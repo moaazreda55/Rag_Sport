@@ -1,13 +1,12 @@
-from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter, TokenTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from sentence_transformers import SentenceTransformer
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain_chroma import Chroma
+from langchain.schema import Document
 from langchain_core.prompts import PromptTemplate ,ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-# from ragas.integrations.langchain import EvaluatorChain
-# from ragas.metrics import faithfulness
-# from ragas.metrics import context_precision
 import os
 import glob
 from dotenv import load_dotenv
@@ -26,20 +25,26 @@ load_dotenv()
 
 file = open("./sports.txt",'r')
 file_content = file.read()
+doc = Document(page_content=file_content)
 
 def split_text(text):
-    text_spliter = CharacterTextSplitter(
-        separator= "   ",
-        chunk_size=80,
-        chunk_overlap=15)
-
-    chunks = text_spliter.create_documents([text])
+    token_splitter = TokenTextSplitter(
+    encoding_name="cl100k_base",  
+    chunk_size=1000,
+    chunk_overlap=200)
+    token_chunks = token_splitter.create_documents([text])
+    semantic_splitter = SemanticChunker(
+    embeddings=Embeding(),
+    breakpoint_threshold_type="gradient",
+    breakpoint_threshold_amount=0.8
+    )
+    chunks = semantic_splitter.split_documents(token_chunks)
     return chunks
 
 class Embeding:
     def __init__(self):
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
-
+        # self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.model = SentenceTransformer("intfloat/multilingual-e5-base")
     def embed_documents(self,docs):
         embedings = self.model.encode(docs)
         return embedings.tolist()
@@ -69,7 +74,7 @@ def build_chain(vector_store):
 
     retriever = vector_store.as_retriever(
             search_type="similarity",
-            search_kwargs={"k":3})
+            search_kwargs={"k":5})
 
     prompt_text = os.getenv("prompt")
 
@@ -83,25 +88,24 @@ def build_chain(vector_store):
     
     return chain
 
-# def evaluation()
-#     faithfulness_chain = EvaluatorChain(
-#     metric=faithfulness,
-#     llm=llm,
-#     embeddings=Embeding())
-#     eval_result= faithfulness_chain()
-
 
 if __name__ == "__main__":
 
-    chunks = split_text(file_content)
+    chunks = split_text(file_content)    
     vector_store = VectorStore(chunks)
     chain = build_chain(vector_store)
+    question ="ماذا تعرف عن المدافعون الذين يحاول برشلونه ضمهم ؟"
+
+    retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    similar_responce = retriever.invoke(question)
+    similar_text=[text.page_content for text in similar_responce]
 
     answer = chain.invoke("ماذا تعرف عن المدافعون الذين يحاول برشلونه ضمهم ؟")
+    
     print(answer)
+    print(similar_text)
 
-
-
+    
 # prompt = """
 # You are an AI bot , your role is to answer the user 
 # questions from the knowledge you get from the document,
